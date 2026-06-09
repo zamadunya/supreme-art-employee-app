@@ -55,6 +55,8 @@ export default function EmployeeProfileTabs({
           ["CNIC Expiry", fmtDate(employee.cnicExpiry)],
           ["Passport No", employee.passportNumber],
           ["Passport Expiry", fmtDate(employee.passportExpiry)],
+          ["SSI Number", employee.ssiNumber],
+          ["UBI Number", employee.ubiNumber],
         ]} />}
 
         {tab === "contact" && <Grid items={[
