@@ -100,6 +100,13 @@ export default function AttendancePage() {
             onChange={e => setDate(e.target.value)}
             style={{ width: "auto", fontSize: 13, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border-strong)" }}
           />
+          <a
+            href="/attendance/print"
+            className="btn btn-print"
+            style={{ padding: "8px 14px", fontSize: 13 }}
+          >
+            🖨 Print Blank Sheet
+          </a>
           <button
             onClick={downloadCSV}
             disabled={employees.length === 0}
