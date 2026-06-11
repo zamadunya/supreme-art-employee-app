@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 type EmployeeAttendance = {
   id: number;
@@ -22,18 +22,24 @@ export default function AttendancePage() {
   const today = new Date().toISOString().slice(0, 10);
   const [date, setDate] = useState(today);
   const [employees, setEmployees] = useState<EmployeeAttendance[]>([]);
+  const [savedSnapshot, setSavedSnapshot] = useState<Record<number, EmployeeAttendance["status"]>>({});
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
 
   const fetchAttendance = useCallback(async (d: string) => {
     setLoading(true);
     setError(null);
+    setUploadMessage(null);
     try {
       const res = await fetch(`/api/attendance?date=${d}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setEmployees(data);
+      const snap: Record<number, EmployeeAttendance["status"]> = {};
+      data.forEach((e: EmployeeAttendance) => { snap[e.id] = e.status; });
+      setSavedSnapshot(snap);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -43,17 +49,49 @@ export default function AttendancePage() {
 
   useEffect(() => { fetchAttendance(date); }, [date, fetchAttendance]);
 
-  const mark = async (emp: EmployeeAttendance, status: "present" | "absent" | "leave") => {
-    setSaving(emp.id);
+  const mark = (emp: EmployeeAttendance, status: "present" | "absent" | "leave") => {
+    setUploadMessage(null);
+    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, status } : e));
+  };
+
+  const markAllPresent = () => {
+    setUploadMessage(null);
+    setEmployees(prev => prev.map(e => ({ ...e, status: "present" })));
+  };
+
+  const resetUnsaved = () => {
+    setUploadMessage(null);
+    setEmployees(prev => prev.map(e => ({ ...e, status: savedSnapshot[e.id] ?? null })));
+  };
+
+  const dirtyEmployees = useMemo(
+    () => employees.filter(e => e.status !== (savedSnapshot[e.id] ?? null) && e.status !== null),
+    [employees, savedSnapshot]
+  );
+
+  const uploadAll = async () => {
+    if (dirtyEmployees.length === 0) return;
+    setUploading(true);
+    setError(null);
+    setUploadMessage(null);
     try {
-      await fetch("/api/attendance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId: emp.id, date, status }),
-      });
-      setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, status } : e));
+      for (const emp of dirtyEmployees) {
+        const res = await fetch("/api/attendance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ employeeId: emp.id, date, status: emp.status }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+      }
+      const newSnap = { ...savedSnapshot };
+      dirtyEmployees.forEach(e => { newSnap[e.id] = e.status; });
+      setSavedSnapshot(newSnap);
+      setUploadMessage(`✓ Saved ${dirtyEmployees.length} record${dirtyEmployees.length !== 1 ? "s" : ""} to attendance log.`);
+    } catch (e: any) {
+      setError(e.message);
     } finally {
-      setSaving(null);
+      setUploading(false);
     }
   };
 
@@ -85,46 +123,46 @@ export default function AttendancePage() {
     URL.revokeObjectURL(url);
   };
 
+  const niceDate = new Date(date + "T00:00:00").toLocaleDateString("en-GB", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric"
+  });
+
   return (
     <div>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Attendance</h1>
-          <p style={{ color: "#888", marginTop: 4, fontSize: 13 }}>{employees.length} employee{employees.length !== 1 ? "s" : ""}</p>
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Attendance Sheet</h1>
+          <p style={{ color: "#888", marginTop: 4, fontSize: 13 }}>
+            <strong style={{ color: "#444" }}>{niceDate}</strong> · {employees.length} employee{employees.length !== 1 ? "s" : ""}
+          </p>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
             type="date"
             value={date}
             onChange={e => setDate(e.target.value)}
             style={{ width: "auto", fontSize: 13, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border-strong)" }}
           />
-          <a
-            href="/attendance/print"
-            className="btn btn-print"
-            style={{ padding: "8px 14px", fontSize: 13 }}
-          >
-            🖨 Print Blank Sheet
-          </a>
+          <a href="/attendance/print" className="btn btn-print" style={{ padding: "8px 14px", fontSize: 13 }}>🖨 Print Blank</a>
           <button
             onClick={downloadCSV}
             disabled={employees.length === 0}
             style={{
               display: "flex", alignItems: "center", gap: 6,
-              padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
-              background: "var(--primary)", color: "#fff", border: "none",
+              padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+              background: "#fff", color: "var(--fg)", border: "1px solid var(--border-strong)",
               cursor: employees.length === 0 ? "not-allowed" : "pointer",
               opacity: employees.length === 0 ? 0.5 : 1,
             }}
           >
-            ⬇ Download CSV
+            ⬇ CSV
           </button>
         </div>
       </div>
 
       {/* Summary cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 16 }}>
         {[
           { label: "Present",  count: summary.present,  color: "var(--success)", bg: "var(--success-bg)" },
           { label: "Absent",   count: summary.absent,   color: "var(--danger)",  bg: "var(--danger-bg)"  },
@@ -136,6 +174,63 @@ export default function AttendancePage() {
             <div style={{ fontSize: 12, color: s.color, fontWeight: 600, marginTop: 2 }}>{s.label}</div>
           </div>
         ))}
+      </div>
+
+      {/* Action bar — Upload + helpers */}
+      <div className="card" style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "12px 16px", marginBottom: 16,
+        background: dirtyEmployees.length > 0 ? "#fffbe6" : "#f8fafc",
+        border: `1px solid ${dirtyEmployees.length > 0 ? "#f1c40f55" : "var(--border)"}`,
+      }}>
+        <div style={{ fontSize: 13, color: "#555" }}>
+          {dirtyEmployees.length > 0
+            ? <><strong style={{ color: "#854F0B" }}>{dirtyEmployees.length} unsaved change{dirtyEmployees.length !== 1 ? "s" : ""}</strong> — click Upload to save.</>
+            : uploadMessage
+              ? <span style={{ color: "var(--success)", fontWeight: 600 }}>{uploadMessage}</span>
+              : <>All changes saved.</>
+          }
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={markAllPresent}
+            disabled={employees.length === 0 || uploading}
+            style={{
+              padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 500,
+              background: "#fff", color: "var(--fg)", border: "1px solid var(--border-strong)",
+              cursor: employees.length === 0 ? "not-allowed" : "pointer",
+              opacity: employees.length === 0 ? 0.5 : 1,
+            }}
+          >
+            ✓ All Present
+          </button>
+          <button
+            onClick={resetUnsaved}
+            disabled={dirtyEmployees.length === 0 || uploading}
+            style={{
+              padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 500,
+              background: "#fff", color: "var(--fg)", border: "1px solid var(--border-strong)",
+              cursor: dirtyEmployees.length === 0 ? "not-allowed" : "pointer",
+              opacity: dirtyEmployees.length === 0 ? 0.5 : 1,
+            }}
+          >
+            ↺ Reset
+          </button>
+          <button
+            onClick={uploadAll}
+            disabled={dirtyEmployees.length === 0 || uploading}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "8px 18px", borderRadius: 8, fontSize: 13, fontWeight: 700,
+              background: "var(--primary)", color: "#fff", border: "none",
+              cursor: dirtyEmployees.length === 0 ? "not-allowed" : "pointer",
+              opacity: dirtyEmployees.length === 0 ? 0.5 : 1,
+              boxShadow: dirtyEmployees.length > 0 ? "0 2px 8px rgba(163,45,45,0.25)" : "none",
+            }}
+          >
+            {uploading ? "Uploading..." : `⬆ Upload to Records${dirtyEmployees.length > 0 ? ` (${dirtyEmployees.length})` : ""}`}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -164,8 +259,10 @@ export default function AttendancePage() {
               </tr>
             </thead>
             <tbody>
-              {employees.map(emp => (
-                <tr key={emp.id}>
+              {employees.map(emp => {
+                const isDirty = emp.status !== (savedSnapshot[emp.id] ?? null) && emp.status !== null;
+                return (
+                <tr key={emp.id} style={isDirty ? { background: "#fffbe6" } : undefined}>
                   <td>
                     {emp.photoUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -177,7 +274,10 @@ export default function AttendancePage() {
                     )}
                   </td>
                   <td style={{ fontWeight: 600, color: "var(--primary)", fontSize: 12 }}>{emp.employeeId}</td>
-                  <td style={{ fontWeight: 500 }}>{emp.firstName} {emp.lastName}</td>
+                  <td style={{ fontWeight: 500 }}>
+                    {emp.firstName} {emp.lastName}
+                    {isDirty && <span style={{ marginLeft: 6, fontSize: 10, color: "#854F0B", fontWeight: 600 }}>● unsaved</span>}
+                  </td>
                   <td style={{ color: "#666" }}>{emp.designation || "—"}</td>
                   <td style={{ color: "#666" }}>{emp.department || "—"}</td>
                   <td>
@@ -202,7 +302,6 @@ export default function AttendancePage() {
                       {(["present", "absent", "leave"] as const).map(s => (
                         <button
                           key={s}
-                          disabled={saving === emp.id}
                           onClick={() => mark(emp, s)}
                           style={{
                             padding: "5px 12px",
@@ -212,8 +311,7 @@ export default function AttendancePage() {
                             color: STATUS_CONFIG[s].color,
                             fontWeight: emp.status === s ? 700 : 500,
                             fontSize: 11,
-                            cursor: saving === emp.id ? "not-allowed" : "pointer",
-                            opacity: saving === emp.id ? 0.6 : 1,
+                            cursor: "pointer",
                             transition: "all 0.15s",
                           }}
                         >
@@ -223,7 +321,8 @@ export default function AttendancePage() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
