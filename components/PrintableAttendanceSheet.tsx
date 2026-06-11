@@ -16,7 +16,7 @@ export default function PrintableAttendanceSheet({ employees }: { employees: Emp
     <>
       {/* Controls (hidden on print) */}
       <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 10 }}>
-        <a href="/attendance" style={{ fontSize: 12, color: "var(--primary)" }}>← Back to Attendance</a>
+        <a href="/attendance/mark" style={{ fontSize: 12, color: "var(--primary)" }}>← Back to Attendance</a>
         <button className="btn btn-print" onClick={() => window.print()}>🖨 Print Sheet</button>
       </div>
 
